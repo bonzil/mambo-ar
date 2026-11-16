@@ -20,7 +20,7 @@
 </style>
 </head>
 <body>
-<model-viewer id="mv" src="models/mambo.glb?v=5" alt="맘보"
+<model-viewer id="mv" src="models/mambo.glb?v=6" alt="맘보"
   ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor"
   camera-controls touch-action="pan-y" camera-orbit="0deg 80deg auto" shadow-intensity="1" exposure="1.1" interaction-prompt="none">
   <button slot="ar-button" id="ar">내 방에 맘보 부르기</button>
@@ -37,7 +37,7 @@ const BLINK = 8;
 const mv = document.getElementById('mv'), bar = document.getElementById('faces');
 let eyes, mouth, current = 'idle';
 const cell = (mat, c, cols = 4, rows = 8) =>
-  mat?.pbrMetallicRoughness.baseColorTexture.texture?.sampler.setOffset({u: (c % cols) / cols, v: Math.floor(c / cols) / rows});
+  mat?.emissiveTexture?.texture?.sampler.setOffset({u: (c % cols) / cols, v: Math.floor(c / cols) / rows});
 function setFace(name) {
   current = name; const [, e, m] = FACES[name];
   cell(eyes, e); cell(mouth, m);
