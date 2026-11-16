@@ -12,16 +12,53 @@
   model-viewer{position:fixed;inset:0;width:100%;height:100%;--poster-color:transparent}
   .title{position:fixed;top:max(16px,env(safe-area-inset-top));left:16px;padding:10px 16px;border-radius:16px;background:rgba(255,255,255,.72);pointer-events:none}
   .title h1{margin:0;font-size:18px}.title p{margin:4px 0 0;font-size:13px;color:#8a6670}
-  #ar{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
+  .faces{position:fixed;left:0;right:0;bottom:calc(max(24px,env(safe-area-inset-bottom)) + 64px);display:flex;gap:8px;overflow-x:auto;padding:4px 16px;scrollbar-width:none}
+  .faces button{flex:none;border:1px solid rgba(120,70,90,.14);background:rgba(255,255,255,.8);color:#5b3a43;border-radius:999px;padding:9px 14px;font-size:14px;font-weight:700}
+  .faces button.on{background:#5b3a43;color:#fff}
+  #ar{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);white-space:nowrap;
     border:0;border-radius:999px;padding:14px 28px;font-size:16px;font-weight:800;color:#fff;background:#e86f8c;box-shadow:0 6px 18px rgba(232,111,140,.4)}
 </style>
 </head>
 <body>
-<model-viewer src="models/mambo.glb" ios-src="models/mambo.usdz" alt="맘보"
+<model-viewer id="mv" src="models/mambo.glb" alt="맘보"
   ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor"
-  camera-controls auto-rotate touch-action="pan-y" shadow-intensity="1" exposure="1.1" interaction-prompt="none">
+  camera-controls touch-action="pan-y" camera-orbit="0deg 80deg auto" shadow-intensity="1" exposure="1.1" interaction-prompt="none">
   <button slot="ar-button" id="ar">내 방에 맘보 부르기</button>
 </model-viewer>
-<div class="title"><h1>맘보 AR</h1><p>버튼을 누르고 바닥을 비추면 맘보가 나타나요</p></div>
+<div class="title"><h1>맘보 AR</h1><p>표정을 고르고 버튼을 누르면 바닥에 맘보가 나타나요</p></div>
+<div class="faces" id="faces"></div>
+<script type="module">
+// Eyes/Mouth textures are 4x8 expression atlases; Brows 4x4. Cell -> UV offset.
+const FACES = {
+  idle:['기본',0,1], happy:['웃음',9,2], star:['반짝',13,15], mambo:['맘보',1,10], shock:['놀람',12,5],
+  panic:['><',7,11], dizzy:['어질',14,18], sleepy:['졸림',10,4], cry:['울음',11,9]
+};
+const BLINK = 8;
+const mv = document.getElementById('mv'), bar = document.getElementById('faces');
+let eyes, mouth, current = 'idle';
+const cell = (mat, c, cols = 4, rows = 8) =>
+  mat?.pbrMetallicRoughness.baseColorTexture.texture?.sampler.setOffset({u: (c % cols) / cols, v: Math.floor(c / cols) / rows});
+function setFace(name) {
+  current = name; const [, e, m] = FACES[name];
+  cell(eyes, e); cell(mouth, m);
+  bar.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.face === name));
+}
+for (const [k, [label]] of Object.entries(FACES)) {
+  const b = document.createElement('button'); b.textContent = label; b.dataset.face = k;
+  b.onclick = () => setFace(k); bar.appendChild(b);
+}
+mv.addEventListener('load', () => {
+  const mats = mv.model.materials;
+  eyes = mats.find(m => m.name === 'Eyes'); mouth = mats.find(m => m.name === 'Mouth');
+  setFace('idle');
+  (function blink() {
+    setTimeout(() => {
+      const e = FACES[current][1];
+      if (e <= 6) { cell(eyes, BLINK); setTimeout(() => cell(eyes, FACES[current][1]), 120); }
+      blink();
+    }, 2000 + Math.random() * 3500);
+  })();
+});
+</script>
 </body>
 </html>
