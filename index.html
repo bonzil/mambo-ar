@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fde8e4">
+<title>맘보 AR</title>
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;font-family:"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:#5b3a43;
+    background:radial-gradient(120% 90% at 50% 0%,#fff6ef 0%,#fde8e4 55%,#f6d6dc 100%)}
+  model-viewer{position:fixed;inset:0;width:100%;height:100%;--poster-color:transparent}
+  .title{position:fixed;top:max(16px,env(safe-area-inset-top));left:16px;padding:10px 16px;border-radius:16px;background:rgba(255,255,255,.72);pointer-events:none}
+  .title h1{margin:0;font-size:18px}.title p{margin:4px 0 0;font-size:13px;color:#8a6670}
+  #ar{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
+    border:0;border-radius:999px;padding:14px 28px;font-size:16px;font-weight:800;color:#fff;background:#e86f8c;box-shadow:0 6px 18px rgba(232,111,140,.4)}
+</style>
+</head>
+<body>
+<model-viewer src="models/mambo.glb" ios-src="models/mambo.usdz" alt="맘보"
+  ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor"
+  camera-controls auto-rotate touch-action="pan-y" shadow-intensity="1" exposure="1.1" interaction-prompt="none">
+  <button slot="ar-button" id="ar">내 방에 맘보 부르기</button>
+</model-viewer>
+<div class="title"><h1>맘보 AR</h1><p>버튼을 누르고 바닥을 비추면 맘보가 나타나요</p></div>
+</body>
+</html>
