@@ -2,63 +2,746 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#fde8e4">
 <title>맘보 AR</title>
-<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;font-family:"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:#5b3a43;
-    background:radial-gradient(120% 90% at 50% 0%,#fff6ef 0%,#fde8e4 55%,#f6d6dc 100%)}
-  model-viewer{position:fixed;inset:0;width:100%;height:100%;--poster-color:transparent}
-  .title{position:fixed;top:max(16px,env(safe-area-inset-top));left:16px;padding:10px 16px;border-radius:16px;background:rgba(255,255,255,.72);pointer-events:none}
-  .title h1{margin:0;font-size:18px}.title p{margin:4px 0 0;font-size:13px;color:#8a6670}
-  .faces{position:fixed;left:0;right:0;bottom:calc(max(24px,env(safe-area-inset-bottom)) + 64px);display:flex;gap:8px;overflow-x:auto;padding:4px 16px;scrollbar-width:none}
-  .faces button{flex:none;border:1px solid rgba(120,70,90,.14);background:rgba(255,255,255,.8);color:#5b3a43;border-radius:999px;padding:9px 14px;font-size:14px;font-weight:700}
-  .faces button.on{background:#5b3a43;color:#fff}
-  #ar{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);white-space:nowrap;
-    border:0;border-radius:999px;padding:14px 28px;font-size:16px;font-weight:800;color:#fff;background:#e86f8c;box-shadow:0 6px 18px rgba(232,111,140,.4)}
+  :root { --ink:#5b3a43; --soft:#8a6670; --accent:#e86f8c; --card:rgba(255,255,255,.8); --line:rgba(120,70,90,.14); }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; overflow:hidden; overscroll-behavior:none; color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  body { background:radial-gradient(120% 90% at 50% 0%,#fff6ef 0%,#fde8e4 55%,#f6d6dc 100%); }
+  body[data-mode=slam], body[data-mode=gyro] { background:#000; }
+  #stage { position:fixed; inset:0; }
+  #camvideo, #camfeed, #scene { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #camvideo { object-fit:cover; visibility:hidden; }
+  body[data-mode=gyro] #camvideo { visibility:visible; }
+  #scene { touch-action:none; }
+
+  .top { position:fixed; top:max(12px,env(safe-area-inset-top)); left:12px; right:12px; display:flex; gap:8px; align-items:flex-start; pointer-events:none; }
+  .title { padding:9px 14px; border-radius:14px; background:var(--card); border:1px solid var(--line); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+  .title h1 { margin:0; font-size:16px; } .title p { margin:3px 0 0; font-size:12px; color:var(--soft); line-height:1.4; }
+  .top .sp { flex:1; }
+  .tools { display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
+  .chip { pointer-events:auto; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:9px 13px;
+    font:inherit; font-size:13px; font-weight:700; -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); white-space:nowrap; }
+  .chip.primary { background:var(--accent); color:#fff; border-color:transparent; }
+  .chip[hidden] { display:none; }
+
+  .faces { position:fixed; left:0; right:0; bottom:calc(max(14px,env(safe-area-inset-bottom)) + 146px); display:flex; gap:6px; overflow-x:auto; padding:4px 12px; scrollbar-width:none; }
+  .faces::-webkit-scrollbar { display:none; }
+  .faces button { flex:none; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:7px 12px; font:inherit; font-size:13px; font-weight:700; }
+  .faces button.on { background:var(--ink); color:#fff; }
+
+  #stick { position:fixed; left:max(18px,env(safe-area-inset-left)); bottom:calc(max(14px,env(safe-area-inset-bottom)) + 8px); width:128px; height:128px; border-radius:50%;
+    background:rgba(255,255,255,.35); border:2px solid rgba(255,255,255,.8); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); touch-action:none; }
+  #knob { position:absolute; left:50%; top:50%; width:56px; height:56px; margin:-28px 0 0 -28px; border-radius:50%; background:#fff; box-shadow:0 4px 12px rgba(91,58,67,.3); pointer-events:none; }
+  .acts { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:calc(max(14px,env(safe-area-inset-bottom)) + 8px); display:flex; gap:12px; align-items:flex-end; }
+  .act { border:0; border-radius:50%; font:inherit; font-weight:800; color:#fff; box-shadow:0 6px 16px rgba(91,58,67,.3); touch-action:manipulation; transition:transform .08s; }
+  .act:active { transform:scale(.9); }
+  #btnMambo { width:74px; height:74px; font-size:15px; background:#f2a541; }
+  #btnJump { width:94px; height:94px; font-size:18px; background:var(--accent); }
+
+  #bubble { position:fixed; left:0; top:0; padding:6px 12px; border-radius:14px; background:#fff; color:var(--ink); font-weight:800; font-size:16px;
+    box-shadow:0 4px 12px rgba(0,0,0,.18); pointer-events:none; opacity:0; transition:opacity .15s; transform:translate(-50%,-100%); white-space:nowrap; }
+  #toast { position:fixed; left:50%; top:calc(max(12px,env(safe-area-inset-top)) + 70px); transform:translateX(-50%); max-width:88vw; padding:10px 14px; border-radius:14px;
+    background:rgba(40,24,30,.86); color:#fff; font-size:13px; line-height:1.45; text-align:center; pointer-events:none; opacity:0; transition:opacity .2s; }
+  #toast.show { opacity:1; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(253,232,228,.7); font-weight:700; }
+  #loading[hidden] { display:none; }
 </style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/" } }
+</script>
 </head>
-<body>
-<model-viewer id="mv" src="models/mambo.glb?v=6" alt="맘보"
-  ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor"
-  camera-controls touch-action="pan-y" camera-orbit="0deg 80deg auto" shadow-intensity="1" exposure="1.1" interaction-prompt="none">
-  <button slot="ar-button" id="ar">내 방에 맘보 부르기</button>
-</model-viewer>
-<div class="title"><h1>맘보 AR</h1><p>표정을 고르고 버튼을 누르면 바닥에 맘보가 나타나요</p></div>
-<div class="faces" id="faces"></div>
+<body data-mode="virtual">
+<div id="stage">
+  <video id="camvideo" playsinline muted autoplay></video>
+  <canvas id="scene" aria-label="맘보가 있는 공간"></canvas>
+</div>
+
+<div class="top">
+  <div class="title"><h1>맘보 AR</h1><p id="hint">조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요</p></div>
+  <div class="sp"></div>
+  <div class="tools">
+    <button class="chip primary" id="btnCam" type="button">카메라 AR</button>
+    <button class="chip" id="btnHeight" type="button" hidden>폰 높이: 서서</button>
+    <button class="chip" id="btnQuick" type="button" hidden>기본 AR</button>
+  </div>
+</div>
+
+<div class="faces" id="faces" role="toolbar" aria-label="표정"></div>
+
+<div id="stick" aria-label="이동 조이스틱"><div id="knob"></div></div>
+<div class="acts">
+  <button class="act" id="btnMambo" type="button">맘보!</button>
+  <button class="act" id="btnJump" type="button">점프</button>
+</div>
+
+<div id="bubble">맘보!</div>
+<div id="toast" role="status"></div>
+<div id="loading">맘보 부르는 중…</div>
+
 <script type="module">
-// Eyes/Mouth textures are 4x8 expression atlases; Brows 4x4. Cell -> UV offset.
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
+const angDiff = (a, b) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
+const XR8_URL = 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js';
+
+let mode = 'virtual';            // 'virtual' | 'slam' | 'gyro'
+let arHeight = 1.3;              // phone height above the floor in the camera modes (m)
+let time = 0, lastT = performance.now(), busy = false;
+const diag = {};
+
+// ---------------------------------------------------------------- renderer
+const canvas = $('#scene'), video = $('#camvideo');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xd9b8c0, 1.7));
+const sun = new THREE.DirectionalLight(0xfff3e6, 1.3);
+sun.position.set(1, 3, 2);
+scene.add(sun);
+
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const shadowTex = canvasTex(128, 128, (g, w) => {
+  const grd = g.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
+  grd.addColorStop(0, 'rgba(60,30,40,0.45)'); grd.addColorStop(0.55, 'rgba(60,30,40,0.2)'); grd.addColorStop(1, 'rgba(60,30,40,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, w, w);
+});
+
+// Virtual floor, only shown without the camera.
+const FLOOR_R = 2.4;
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(FLOOR_R, 64),
+  new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, map: canvasTex(1024, 1024, (g, w) => {
+    const c = w / 2, grd = g.createRadialGradient(c, c, 0, c, c, c);
+    grd.addColorStop(0, 'rgba(255,255,255,0.75)'); grd.addColorStop(0.75, 'rgba(255,240,240,0.45)'); grd.addColorStop(1, 'rgba(255,240,240,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, w, w);
+    g.fillStyle = 'rgba(232,111,140,0.22)';
+    for (let x = 16; x < w; x += 32) for (let y = 16; y < w; y += 32) { g.beginPath(); g.arc(x, y, 2.4, 0, 7); g.fill(); }
+  }) })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.renderOrder = -2;
+scene.add(floor);
+
+// Tap marker on the floor.
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.065, 40), new THREE.MeshBasicMaterial({ color: 0xe86f8c, transparent: true, depthWrite: false }));
+marker.rotation.x = -Math.PI / 2; marker.position.y = 0.002; marker.visible = false; marker.renderOrder = 3;
+scene.add(marker);
+let markerLife = 0;
+
+// ---------------------------------------------------------------- Mambo
+const pet = {
+  root: new THREE.Group(), body: new THREE.Group(), model: null, height: 0.45,
+  x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, grounded: true, airJumps: 0,
+  hop: 0, sq: 0, sqv: 0, wiggle: 0, spin: 0, target: null,
+};
+scene.add(pet.root);
+pet.root.add(pet.body);
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.001; shadow.renderOrder = 1;
+pet.root.add(shadow);
+
+// Face: eyes and mouth are 4x8 expression atlases; the button picks a cell.
 const FACES = {
-  idle:['기본',0,1], happy:['웃음',9,2], star:['반짝',13,15], mambo:['맘보',1,10], shock:['놀람',12,5],
-  panic:['><',7,11], dizzy:['어질',14,18], sleepy:['졸림',10,4], cry:['울음',11,9]
+  idle: ['기본', 0, 1], happy: ['웃음', 9, 2], star: ['반짝', 13, 15], mambo: ['맘보', 1, 10], shock: ['놀람', 12, 5],
+  panic: ['><', 7, 11], dizzy: ['어질', 14, 18], sleepy: ['졸림', 10, 4], cry: ['울음', 11, 9],
 };
 const BLINK = 8;
-const mv = document.getElementById('mv'), bar = document.getElementById('faces');
-let eyes, mouth, current = 'idle';
-const cell = (mat, c, cols = 4, rows = 8) =>
-  mat?.emissiveTexture?.texture?.sampler.setOffset({u: (c % cols) / cols, v: Math.floor(c / cols) / rows});
-function setFace(name) {
-  current = name; const [, e, m] = FACES[name];
-  cell(eyes, e); cell(mouth, m);
-  bar.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.face === name));
+const face = { eye: null, mouth: null, base: 'idle', over: null, overUntil: 0, blinkT: 2.5, blinking: 0 };
+const setCell = (tex, c) => { if (tex) tex.offset.set((c % 4) / 4, Math.floor(c / 4) / 8); };
+function flashFace(name, sec) { face.over = name; face.overUntil = time + sec; }
+function updateFace(dt) {
+  const name = face.over && time < face.overUntil ? face.over : face.base;
+  const [, e, m] = FACES[name];
+  face.blinkT -= dt;
+  if (face.blinkT <= 0) { face.blinking = 0.12; face.blinkT = 2 + Math.random() * 3.5; }
+  face.blinking -= dt;
+  setCell(face.eye, e <= 6 && face.blinking > 0 ? BLINK : e);
+  setCell(face.mouth, m);
 }
+const facesBar = $('#faces');
 for (const [k, [label]] of Object.entries(FACES)) {
-  const b = document.createElement('button'); b.textContent = label; b.dataset.face = k;
-  b.onclick = () => setFace(k); bar.appendChild(b);
+  const b = document.createElement('button');
+  b.type = 'button'; b.textContent = label; b.dataset.face = k;
+  b.onclick = () => { face.base = k; face.over = null; facesBar.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); };
+  facesBar.appendChild(b);
 }
-mv.addEventListener('load', () => {
-  const mats = mv.model.materials;
-  eyes = mats.find(m => m.name === 'Eyes'); mouth = mats.find(m => m.name === 'Mouth');
-  setFace('idle');
-  (function blink() {
-    setTimeout(() => {
-      const e = FACES[current][1];
-      if (e <= 6) { cell(eyes, BLINK); setTimeout(() => cell(eyes, FACES[current][1]), 120); }
-      blink();
-    }, 2000 + Math.random() * 3500);
-  })();
+facesBar.firstChild.classList.add('on');
+
+async function loadMambo() {
+  const gltf = await new GLTFLoader().loadAsync('models/mambo.glb?v=7');
+  const model = gltf.scene;
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  model.position.set(-center.x, -box.min.y, -center.z);
+  pet.height = size.y;
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    const m = o.material;
+    if (m.name === 'Eyes') face.eye = m.emissiveMap;
+    if (m.name === 'Mouth') face.mouth = m.emissiveMap;
+  });
+  pet.model = model;
+  pet.body.add(model);
+  shadow.scale.setScalar(Math.max(size.x, size.z) * 1.25);
+}
+
+// ---------------------------------------------------------------- sound
+const Sound = {
+  ctx: null, voice: null, loading: null,
+  unlock() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this.loading) {
+      this.loading = fetch('sounds/mambo.mp3').then((r) => r.arrayBuffer())
+        .then((b) => new Promise((ok, bad) => this.ctx.decodeAudioData(b, ok, bad)))
+        .then((buf) => { this.voice = buf; }).catch(() => { this.loading = null; });
+    }
+  },
+  mambo() {
+    this.unlock();
+    if (!this.ctx || !this.voice) return false;
+    const s = this.ctx.createBufferSource();
+    s.buffer = this.voice;
+    s.playbackRate.value = 0.94 + Math.random() * 0.16;
+    s.connect(this.ctx.destination);
+    s.start();
+    return true;
+  },
+  tone(f0, f1, dur, vol, type = 'sine') {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.ctx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  boing() { this.tone(260, 720, 0.18, 0.16); },
+  thump(k) { this.tone(150, 70, 0.12, 0.12 * k, 'triangle'); },
+  pop() { this.tone(500, 900, 0.09, 0.1); },
+};
+window.addEventListener('pointerdown', () => Sound.unlock(), { capture: true });
+
+// ---------------------------------------------------------------- actions
+const bubble = $('#bubble');
+let bubbleUntil = 0;
+function say(text, sec) { bubble.textContent = text; bubbleUntil = time + sec; }
+
+function jump() {
+  if (pet.grounded) {
+    pet.vy = Math.sqrt(2 * 9.8 * pet.height * 0.62);
+    pet.grounded = false; pet.airJumps = 1;
+    pet.sqv += 3.2;
+    flashFace('happy', 0.9);
+    Sound.boing();
+  } else if (pet.airJumps > 0) {           // second jump: a little flip
+    pet.airJumps = 0;
+    pet.vy = Math.max(pet.vy, 0) + Math.sqrt(2 * 9.8 * pet.height * 0.42);
+    pet.spin = 1;
+    flashFace('star', 1.0);
+    Sound.tone(420, 1100, 0.2, 0.15);
+  }
+}
+function mambo() {
+  if (!Sound.mambo()) Sound.pop();
+  flashFace('mambo', 1.4);
+  say('맘보!', 1.3);
+  pet.wiggle = 1;
+  if (pet.grounded) { pet.vy = Math.sqrt(2 * 9.8 * pet.height * 0.18); pet.grounded = false; pet.airJumps = 0; pet.sqv += 1.6; }
+}
+function poke() {
+  flashFace('happy', 1.1);
+  Sound.pop();
+  pet.wiggle = 0.6;
+  if (pet.grounded) { pet.vy = Math.sqrt(2 * 9.8 * pet.height * 0.12); pet.grounded = false; pet.airJumps = 0; }
+}
+$('#btnJump').addEventListener('pointerdown', (e) => { e.preventDefault(); jump(); });
+$('#btnMambo').addEventListener('pointerdown', (e) => { e.preventDefault(); mambo(); });
+
+// ---------------------------------------------------------------- joystick + keys
+const stickEl = $('#stick'), knob = $('#knob');
+const stick = { id: null, x: 0, y: 0 };
+function moveStick(e) {
+  const r = stickEl.getBoundingClientRect(), R = r.width / 2, max = R - 16;
+  let dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R);
+  const d = Math.hypot(dx, dy);
+  if (d > max) { dx *= max / d; dy *= max / d; }
+  stick.x = dx / max; stick.y = dy / max;
+  knob.style.transform = `translate(${dx}px,${dy}px)`;
+}
+stickEl.addEventListener('pointerdown', (e) => { stick.id = e.pointerId; try { stickEl.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ } moveStick(e); });
+stickEl.addEventListener('pointermove', (e) => { if (e.pointerId === stick.id) moveStick(e); });
+const endStick = (e) => { if (e.pointerId !== stick.id) return; stick.id = null; stick.x = stick.y = 0; knob.style.transform = ''; };
+stickEl.addEventListener('pointerup', endStick);
+stickEl.addEventListener('pointercancel', endStick);
+
+const keys = new Set();
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === 'Space') { e.preventDefault(); jump(); }
+  if (e.code === 'KeyM') mambo();
 });
+window.addEventListener('keyup', (e) => keys.delete(e.code));
+function keyAxis() {
+  const x = (keys.has('ArrowRight') || keys.has('KeyD') ? 1 : 0) - (keys.has('ArrowLeft') || keys.has('KeyA') ? 1 : 0);
+  const y = (keys.has('ArrowDown') || keys.has('KeyS') ? 1 : 0) - (keys.has('ArrowUp') || keys.has('KeyW') ? 1 : 0);
+  return [x, y];
+}
+
+// ---------------------------------------------------------------- movement
+const UP = new THREE.Vector3(0, 1, 0), _f = new THREE.Vector3(), _r = new THREE.Vector3();
+const WALK_SPEED = 1.3;          // body heights per second
+const HOP_PERIOD = 0.3;
+function stepPet(dt) {
+  const H = pet.height;
+  camera.getWorldDirection(_f); _f.y = 0;
+  if (_f.lengthSq() < 1e-6) _f.set(0, 0, -1);
+  _f.normalize(); _r.crossVectors(_f, UP);
+  const [kx, ky] = keyAxis();
+  let ix = stick.x + kx, iy = stick.y + ky;
+  const mag = Math.min(1, Math.hypot(ix, iy));
+  let dx = 0, dz = 0;
+  if (mag > 0.1) {
+    const n = Math.hypot(ix, iy); ix /= n; iy /= n;
+    dx = (_r.x * ix - _f.x * iy) * mag; dz = (_r.z * ix - _f.z * iy) * mag;
+    pet.target = null;
+  } else if (pet.target) {
+    const tx = pet.target.x - pet.x, tz = pet.target.z - pet.z, d = Math.hypot(tx, tz);
+    if (d < H * 0.08) pet.target = null;
+    else { const s = Math.min(1, d / (H * 0.4)); dx = (tx / d) * s; dz = (tz / d) * s; }
+  }
+  const sp = WALK_SPEED * H;
+  pet.vx = damp(pet.vx, dx * sp, pet.grounded ? 10 : 3, dt);
+  pet.vz = damp(pet.vz, dz * sp, pet.grounded ? 10 : 3, dt);
+  pet.x += pet.vx * dt; pet.z += pet.vz * dt;
+  if (mode === 'virtual') {
+    const d = Math.hypot(pet.x, pet.z), lim = FLOOR_R - H * 0.6;
+    if (d > lim) { pet.x *= lim / d; pet.z *= lim / d; }
+  }
+  const speed = Math.hypot(pet.vx, pet.vz) / sp;     // 0..1
+  if (speed > 0.05) pet.heading += angDiff(pet.heading, Math.atan2(pet.vx, pet.vz)) * (1 - Math.exp(-12 * dt));
+
+  // vertical: jumps and the little hops of walking
+  let hopY = 0;
+  if (!pet.grounded) {
+    pet.vy -= 9.8 * dt;
+    pet.y += pet.vy * dt;
+    if (pet.y <= 0 && pet.vy < 0) {
+      const impact = Math.min(1, -pet.vy / Math.sqrt(2 * 9.8 * H * 0.6));
+      pet.y = 0; pet.vy = 0; pet.grounded = true; pet.spin = 0;
+      pet.sqv -= 4 * impact;
+      if (impact > 0.35) Sound.thump(impact);
+    }
+  } else if (speed > 0.08) {
+    pet.hop += (dt / HOP_PERIOD) * (0.6 + 0.4 * speed);
+    if (pet.hop >= 1) { pet.hop -= 1; pet.sqv -= 1.2 * speed; }
+    hopY = Math.sin(Math.PI * pet.hop) * H * 0.07 * speed;
+  } else pet.hop = 0;
+
+  // squash & stretch spring (stretch while rising, squash on landing)
+  const sqTarget = pet.grounded ? 0 : clamp(pet.vy * 0.04, -0.1, 0.14);
+  pet.sqv += ((sqTarget - pet.sq) * 140 - pet.sqv * 12) * dt;
+  pet.sq = clamp(pet.sq + pet.sqv * dt, -0.25, 0.25);
+  const breathe = pet.grounded && speed < 0.08 ? Math.sin(time * 2.4) * 0.012 : 0;
+  const sy = 1 + pet.sq + breathe, sxz = 1 - pet.sq * 0.5;
+
+  pet.wiggle = Math.max(0, pet.wiggle - dt * 1.1);
+  if (pet.spin > 0) pet.spin = Math.max(0, pet.spin - dt * 1.9);
+
+  pet.root.position.set(pet.x, 0, pet.z);
+  pet.root.rotation.y = pet.heading;
+  pet.body.position.y = pet.y + hopY;
+  pet.body.scale.set(sxz, sy, sxz);
+  pet.body.rotation.set(speed * 0.12 * (pet.grounded ? 1 : 0.5), (1 - pet.spin) * (pet.spin > 0 ? Math.PI * 2 : 0),
+    Math.sin(time * 18) * 0.16 * pet.wiggle, 'YXZ');
+  const lift = pet.y + hopY;
+  shadow.scale.setScalar(Math.max(0.2, 1 - lift / (H * 1.5)) * pet.height * 0.95);
+  shadow.material.opacity = clamp(1 - lift / (H * 1.4), 0.25, 1);
+}
+
+// speech bubble above the head
+const _hp = new THREE.Vector3();
+function updateBubble() {
+  const show = time < bubbleUntil;
+  bubble.style.opacity = show ? '1' : '0';
+  if (!show) return;
+  _hp.set(pet.x, pet.y + pet.height * 1.08, pet.z).project(camera);
+  if (_hp.z > 1) { bubble.style.opacity = '0'; return; }
+  const r = canvas.getBoundingClientRect();
+  bubble.style.left = `${r.left + (_hp.x * 0.5 + 0.5) * r.width}px`;
+  bubble.style.top = `${r.top + (-_hp.y * 0.5 + 0.5) * r.height}px`;
+}
+
+// ---------------------------------------------------------------- camera: 3D view
+const orbit = { yaw: 0, pitch: 0.3, r: 1.5, tx: 0, tz: 0 };
+function applyOrbit(dt) {
+  orbit.tx = damp(orbit.tx, pet.x, 3, dt); orbit.tz = damp(orbit.tz, pet.z, 3, dt);
+  const ty = pet.height * 0.5, cp = Math.cos(orbit.pitch), R = orbit.r * pet.height / 0.45;
+  camera.position.set(orbit.tx + Math.sin(orbit.yaw) * cp * R, ty + Math.sin(orbit.pitch) * R, orbit.tz + Math.cos(orbit.yaw) * cp * R);
+  camera.lookAt(orbit.tx, ty, orbit.tz);
+}
+
+// ---------------------------------------------------------------- touches on the scene
+const ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+function setRay(cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  _ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  camera.updateMatrixWorld();
+  ray.setFromCamera(_ndc, camera);
+}
+function floorPoint(cx, cy) {
+  setRay(cx, cy);
+  const o = ray.ray.origin, d = ray.ray.direction;
+  if (d.y > -0.02) return null;
+  const t = -o.y / d.y;
+  if (t <= 0 || t > (mode === 'virtual' ? 30 : 6)) return null;
+  return { x: o.x + d.x * t, z: o.z + d.z * t };
+}
+function handleTap(cx, cy) {
+  setRay(cx, cy);
+  if (pet.model && ray.intersectObject(pet.body, true).length) { poke(); return; }
+  const p = floorPoint(cx, cy);
+  if (!p) return;
+  if (mode === 'virtual') { const d = Math.hypot(p.x, p.z), lim = FLOOR_R - pet.height * 0.6; if (d > lim) { p.x *= lim / d; p.z *= lim / d; } }
+  pet.target = p;
+  marker.position.set(p.x, 0.002, p.z); marker.scale.setScalar(pet.height / 0.45); markerLife = 1;
+}
+const ptrs = new Map();
+let tap = null, pinch = null;
+canvas.addEventListener('pointerdown', (e) => {
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+  else { tap = null; const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: orbit.r }; }
+});
+canvas.addEventListener('pointermove', (e) => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+  if (ptrs.size === 1) {
+    if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 8) tap.moved = true;
+    if (mode === 'virtual' && (!tap || tap.moved)) {
+      orbit.yaw -= dx * 0.008;
+      orbit.pitch = clamp(orbit.pitch + dy * 0.006, 0.02, 1.25);
+    }
+  } else if (ptrs.size === 2 && pinch && mode === 'virtual') {
+    const [a, b] = [...ptrs.values()];
+    orbit.r = clamp(pinch.r * pinch.d / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), 0.6, 4);
+  }
+});
+const endPtr = (e) => {
+  if (!ptrs.has(e.pointerId)) return;
+  if (tap && !tap.moved && ptrs.size === 1 && performance.now() - tap.t < 400) handleTap(e.clientX, e.clientY);
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinch = null;
+  tap = null;
+};
+canvas.addEventListener('pointerup', endPtr);
+canvas.addEventListener('pointercancel', endPtr);
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.r = clamp(orbit.r * Math.exp(e.deltaY * 0.001), 0.6, 4); }, { passive: false });
+
+// ---------------------------------------------------------------- camera AR
+// 1) 8th Wall engine (SLAM): Mambo stays put on the floor while you walk around.
+// 2) Fallback: camera video + gyro (rotation only).
+const slam = { canvas: null, running: false, hasPose: false, t0: 0, pos: [0, 1.3, 0], rot: [0, 0, 0, 1], proj: new Float32Array(16) };
+let xr8Promise = null;
+function loadXR8(ms) {
+  if (window.XR8) return Promise.resolve(window.XR8);
+  if (!xr8Promise) {
+    xr8Promise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), ms);
+      window.addEventListener('xrloaded', () => { clearTimeout(timer); resolve(window.XR8); }, { once: true });
+      const s = document.createElement('script');
+      s.src = XR8_URL; s.async = true; s.crossOrigin = 'anonymous';
+      s.setAttribute('data-preload-chunks', 'slam');
+      s.onerror = () => { clearTimeout(timer); reject(new Error('network')); };
+      document.head.appendChild(s);
+    }).catch((e) => { xr8Promise = null; throw e; });
+  }
+  return xr8Promise;
+}
+function sizeSlamCanvas() {
+  if (!slam.canvas) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  slam.canvas.width = Math.round(innerWidth * dpr); slam.canvas.height = Math.round(innerHeight * dpr);
+}
+function stopSlam() {
+  try { if (window.XR8) { window.XR8.stop(); window.XR8.clearCameraPipelineModules(); } } catch (e) { /* stopped */ }
+  if (slam.canvas) slam.canvas.remove();
+  slam.canvas = null; slam.running = false; slam.hasPose = false;
+}
+async function trySlam() {
+  setLoading('공간 읽는 엔진 받는 중… (처음 한 번만 조금 걸려요)');
+  let XR8;
+  try { XR8 = await loadXR8(40000); } catch (e) { diag.slam = 'load ' + e.message; return false; }
+  try { if (!XR8.XrDevice.isDeviceBrowserCompatible({ allowedDevices: XR8.XrConfig.device().MOBILE })) { diag.slam = 'incompatible'; return false; } } catch (e) { /* let run() decide */ }
+  setLoading('카메라 켜는 중…');
+  const ok = await new Promise((resolve) => {
+    let settled = false;
+    const finish = (good, why) => { if (settled) return; settled = true; clearTimeout(timer); diag.slam = why; if (!good) stopSlam(); resolve(good); };
+    const timer = setTimeout(() => finish(false, 'timeout'), 20000);
+    try {
+      const cv = document.createElement('canvas'); cv.id = 'camfeed';
+      $('#stage').insertBefore(cv, canvas);
+      slam.canvas = cv; sizeSlamCanvas();
+      XR8.XrController.configure({ disableWorldTracking: false, scale: 'responsive' });
+      XR8.addCameraPipelineModules([
+        XR8.GlTextureRenderer.pipelineModule(),
+        XR8.XrController.pipelineModule(),
+        {
+          name: 'mambo',
+          onStart: ({ canvasWidth, canvasHeight }) => {
+            XR8.XrController.updateCameraProjectionMatrix({
+              cam: { pixelRectWidth: canvasWidth, pixelRectHeight: canvasHeight, nearClipPlane: 0.01, farClipPlane: 100 },
+              origin: { x: 0, y: arHeight, z: 0 }, facing: { w: 1, x: 0, y: 0, z: 0 },
+            });
+          },
+          onCameraStatusChange: ({ status }) => {
+            if (status === 'hasVideo') finish(true, 'running');
+            else if (status === 'failed') finish(false, 'camera failed');
+          },
+          onUpdate: ({ processCpuResult }) => {
+            const r = processCpuResult && processCpuResult.reality;
+            if (!r || !r.intrinsics) return;
+            if (r.position) slam.pos = [r.position.x, r.position.y, r.position.z];
+            if (r.rotation) slam.rot = [r.rotation.x, r.rotation.y, r.rotation.z, r.rotation.w];
+            for (let i = 0; i < 16; i++) slam.proj[i] = r.intrinsics[i];
+            slam.hasPose = true;
+          },
+          onRender: () => { if (mode === 'slam') frame(performance.now()); },
+          onException: (err) => {
+            diag.err = String((err && err.message) || err);
+            if (!settled) finish(false, 'exception');
+            else if (mode === 'slam') { stopCamera(); toast('공간 추적이 멈춰서 3D 보기로 돌아왔어요.'); }
+          },
+        },
+      ]);
+      XR8.run({ canvas: cv, allowedDevices: XR8.XrConfig.device().MOBILE, cameraConfig: { direction: XR8.XrConfig.camera().BACK } });
+    } catch (e) { diag.err = String((e && e.message) || e); finish(false, 'run threw'); }
+  });
+  if (ok) { slam.running = true; slam.t0 = time; setMode('slam'); }
+  return ok;
+}
+function applySlam() {
+  if (!slam.hasPose) return;
+  camera.position.fromArray(slam.pos);
+  camera.quaternion.fromArray(slam.rot);
+  camera.projectionMatrix.fromArray(slam.proj);
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+}
+
+const gyro = { stream: null, has: false, alpha: 0, beta: 0, gamma: 0, yaw: null, q: new THREE.Quaternion(), ready: false };
+const rad = Math.PI / 180, _zee = new THREE.Vector3(0, 0, 1), _eu = new THREE.Euler(), _q0 = new THREE.Quaternion(),
+  _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _qy = new THREE.Quaternion(), _v = new THREE.Vector3();
+window.addEventListener('deviceorientation', (ev) => {
+  if (ev.alpha === null || ev.beta === null || ev.gamma === null) return;
+  gyro.alpha = ev.alpha * rad; gyro.beta = ev.beta * rad; gyro.gamma = ev.gamma * rad; gyro.has = true;
+});
+const screenAngle = () => ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (Number(window.orientation) || 0)) * rad;
+function applyGyro(dt) {
+  if (!gyro.has) return;
+  _eu.set(gyro.beta, gyro.alpha, -gyro.gamma, 'YXZ');
+  gyro.q.setFromEuler(_eu).multiply(_q1).multiply(_q0.setFromAxisAngle(_zee, -screenAngle()));
+  if (gyro.yaw === null) {
+    _v.set(0, 0, -1).applyQuaternion(gyro.q);
+    if (Math.abs(_v.y) > 0.92) _v.set(0, 1, 0).applyQuaternion(gyro.q);
+    gyro.yaw = Math.PI - Math.atan2(_v.x, _v.z);
+  }
+  gyro.q.premultiply(_qy.setFromAxisAngle(UP, gyro.yaw));
+  if (!gyro.ready) { camera.quaternion.copy(gyro.q); gyro.ready = true; } else camera.quaternion.slerp(gyro.q, 1 - Math.exp(-dt * 20));
+  camera.position.set(0, arHeight, 0);
+}
+function cameraFovDeg() {
+  const tanLong = Math.tan(63 * rad / 2), vw = video.videoWidth || 720, vh = video.videoHeight || 1280;
+  const tanV = vh >= vw ? tanLong : tanLong * (vh / vw), va = vw / vh, sa = innerWidth / innerHeight;
+  return 2 * Math.atan(sa <= va ? tanV : tanV * (va / sa)) / rad;
+}
+function stopGyro() {
+  if (gyro.stream) { gyro.stream.getTracks().forEach((t) => t.stop()); gyro.stream = null; }
+  video.srcObject = null; gyro.ready = false; gyro.yaw = null;
+}
+async function tryGyro() {
+  setLoading('카메라 켜는 중…');
+  gyro.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  video.srcObject = gyro.stream;
+  try { await video.play(); } catch (e) { /* plays once visible */ }
+  const t0 = performance.now();
+  while (!gyro.has && performance.now() - t0 < 1800) await new Promise((r) => setTimeout(r, 60));
+  if (!gyro.has) { stopGyro(); const e = new Error('no orientation'); e.name = 'NoSensorError'; throw e; }
+  setMode('gyro');
+}
+function requestMotion() {
+  const reqs = [];
+  try { if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) reqs.push(DeviceMotionEvent.requestPermission()); } catch (e) { /* */ }
+  try { if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) reqs.push(DeviceOrientationEvent.requestPermission()); } catch (e) { /* */ }
+  if (!reqs.length) return Promise.resolve('granted');
+  return Promise.all(reqs.map((p) => Promise.resolve(p).catch(() => 'denied'))).then((rs) => (rs.includes('granted') ? 'granted' : 'denied'));
+}
+function explain(err) {
+  const n = err && err.name;
+  if (n === 'InsecureError') return 'https 주소에서만 카메라를 켤 수 있어요.';
+  if (n === 'NotAllowedError' || n === 'SecurityError') return '카메라 권한이 꺼져 있어요. Safari 설정에서 카메라를 허용해 주세요.';
+  if (n === 'MotionDeniedError') return '동작 센서 권한이 필요해요. 새로 고친 뒤 허용을 눌러 주세요.';
+  if (n === 'NoSensorError') return '이 기기에는 방향 센서가 없어요. 휴대폰에서 열어 주세요.';
+  return '카메라를 켜지 못했어요. 3D 보기로 계속할게요.';
+}
+async function startCamera() {
+  if (busy) return;
+  busy = true;
+  const motion = requestMotion();             // must be called inside the tap on iOS
+  try {
+    if (!window.isSecureContext) { const e = new Error('insecure'); e.name = 'InsecureError'; throw e; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { const e = new Error('unsupported'); e.name = 'UnsupportedError'; throw e; }
+    if (!((navigator.maxTouchPoints || 0) > 0)) { const e = new Error('no touch'); e.name = 'NoSensorError'; throw e; }
+    const m = await motion;
+    const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    probe.getTracks().forEach((t) => t.stop());
+    if (m === 'denied') { const e = new Error('motion'); e.name = 'MotionDeniedError'; throw e; }
+    if (!(await trySlam())) await tryGyro();
+    toast(mode === 'slam' ? '바닥을 천천히 비춰 주세요. 맘보가 바닥에 내려와요.' : '공간 추적이 안 돼서 제자리 AR로 켰어요. 걸어 다니면 위치가 어긋나요.');
+  } catch (err) {
+    diag.err = String((err && (err.name + ': ' + err.message)) || err);
+    stopSlam(); stopGyro();
+    if (mode !== 'virtual') setMode('virtual');
+    toast(explain(err));
+  } finally { setLoading(null); busy = false; }
+}
+function stopCamera() { stopSlam(); stopGyro(); setMode('virtual'); }
+
+let spawnWait = 0;
+function settleSpawn(dt) {
+  if (spawnWait <= 0) return;
+  const ready = mode === 'gyro' ? gyro.ready : (slam.hasPose && time - slam.t0 > 0.7);
+  if (!ready) return;
+  spawnWait -= dt;
+  const r = canvas.getBoundingClientRect();
+  let p = floorPoint(r.left + r.width / 2, r.top + r.height * 0.6);
+  if (p && Math.hypot(p.x - camera.position.x, p.z - camera.position.z) > 2.2) p = null;
+  if (!p && spawnWait > 0) return;
+  if (!p) {                                   // never looked at the floor: 1 m ahead
+    camera.getWorldDirection(_f); _f.y = 0; _f.normalize();
+    p = { x: camera.position.x + _f.x, z: camera.position.z + _f.z };
+  }
+  pet.x = p.x; pet.z = p.z; pet.target = null;
+  pet.heading = Math.atan2(camera.position.x - p.x, camera.position.z - p.z);
+  pet.y = pet.height * 0.8; pet.vy = 0; pet.grounded = false; pet.airJumps = 0;   // drops in
+  pet.body.visible = true; shadow.visible = true;
+  flashFace('happy', 1.2);
+  spawnWait = 0;
+}
+
+const HEIGHTS = [[1.3, '서서'], [0.9, '앉아서'], [0.45, '책상 위']];
+let heightIdx = 0;
+$('#btnHeight').addEventListener('click', () => {
+  heightIdx = (heightIdx + 1) % HEIGHTS.length;
+  arHeight = HEIGHTS[heightIdx][0];
+  $('#btnHeight').textContent = '폰 높이: ' + HEIGHTS[heightIdx][1];
+  if (mode === 'slam') {
+    try { window.XR8.XrController.updateCameraProjectionMatrix({ origin: { x: 0, y: arHeight, z: 0 }, facing: { w: 1, x: 0, y: 0, z: 0 } }); window.XR8.XrController.recenter(); } catch (e) { /* */ }
+  }
+  respawn();
+});
+function respawn() {
+  if (mode === 'virtual') return;
+  spawnWait = 3; pet.body.visible = false; shadow.visible = false;
+}
+
+function setMode(next) {
+  mode = next;
+  document.body.dataset.mode = next;
+  floor.visible = next === 'virtual';
+  $('#btnCam').textContent = next === 'virtual' ? '카메라 AR' : '3D 보기';
+  $('#btnHeight').hidden = next === 'virtual';
+  $('#hint').textContent = next === 'virtual'
+    ? '조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요'
+    : '바닥을 톡 누르면 맘보가 걸어가요';
+  if (next === 'virtual') { pet.x = pet.z = 0; pet.target = null; pet.body.visible = true; shadow.visible = true; camera.near = 0.01; camera.far = 100; }
+  else respawn();
+  resize();
+}
+$('#btnCam').addEventListener('click', () => { if (mode === 'virtual') startCamera(); else stopCamera(); });
+
+// ---------------------------------------------------------------- iPhone built-in AR (Quick Look, no controls)
+const quickAnchor = document.createElement('a');
+const canQuickLook = quickAnchor.relList && quickAnchor.relList.supports && quickAnchor.relList.supports('ar');
+if (canQuickLook) $('#btnQuick').hidden = false;
+$('#btnQuick').addEventListener('click', async () => {
+  if (!pet.model || busy) return;
+  busy = true; setLoading('기본 AR 준비 중…');
+  try {
+    const { USDZExporter } = await import('three/addons/exporters/USDZExporter.js');
+    const s = new THREE.Scene(), m = pet.model.clone();
+    s.add(m); s.updateMatrixWorld(true);
+    const ab = await new USDZExporter().parseAsync(s);
+    const url = URL.createObjectURL(new Blob([ab], { type: 'model/vnd.usdz+zip' }));
+    quickAnchor.rel = 'ar'; quickAnchor.href = url + '#allowsContentScaling=0';
+    if (!quickAnchor.firstChild) quickAnchor.appendChild(document.createElement('img'));
+    quickAnchor.click();
+  } catch (e) { toast('기본 AR을 열지 못했어요.'); diag.err = String(e); }
+  finally { setLoading(null); busy = false; }
+});
+
+// ---------------------------------------------------------------- ui helpers
+let toastTimer = 0;
+function toast(msg, ms = 4200) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms); }
+function setLoading(msg) { const l = $('#loading'); l.hidden = !msg; if (msg) l.textContent = msg; }
+function resize() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setSize(innerWidth, innerHeight, false);
+  sizeSlamCanvas();
+  if (mode !== 'slam') {
+    camera.aspect = innerWidth / innerHeight;
+    camera.fov = mode === 'gyro' ? cameraFovDeg() : (innerWidth < innerHeight ? 50 : 36);
+    camera.updateProjectionMatrix();
+  }
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------- loop
+let errs = 0;
+function frame(now) {
+  try {
+    const dt = clamp((now - lastT) / 1000, 0.001, 0.05);
+    lastT = now; time += dt;
+    if (mode === 'virtual') applyOrbit(dt); else if (mode === 'gyro') applyGyro(dt); else applySlam();
+    settleSpawn(dt);
+    if (pet.model) { stepPet(dt); updateFace(dt); }
+    if (markerLife > 0) { markerLife -= dt * 1.2; marker.visible = markerLife > 0; marker.material.opacity = Math.max(0, markerLife); }
+    updateBubble();
+    renderer.render(scene, camera);
+  } catch (e) { if (errs++ < 3) console.error(e); diag.err = 'frame: ' + e.message; }
+}
+function loop(now) { if (mode !== 'slam') frame(now); requestAnimationFrame(loop); }
+
+resize();
+requestAnimationFrame(loop);
+loadMambo().then(() => setLoading(null)).catch((e) => { setLoading('맘보를 불러오지 못했어요. 새로 고쳐 주세요.'); diag.err = String(e); });
+window.__mambo = { pet, orbit, face, diag, jump, mambo, get mode() { return mode; } };
 </script>
 </body>
 </html>
