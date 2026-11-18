@@ -64,9 +64,8 @@
   <div class="title"><h1>맘보 AR</h1><p id="hint">조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요</p></div>
   <div class="sp"></div>
   <div class="tools">
-    <button class="chip primary" id="btnCam" type="button">카메라 AR</button>
+    <button class="chip primary" id="btnCam" type="button">📷 카메라로 보기</button>
     <button class="chip" id="btnHeight" type="button" hidden>폰 높이: 서서</button>
-    <button class="chip" id="btnQuick" type="button" hidden>기본 AR</button>
   </div>
 </div>
 
@@ -90,7 +89,7 @@ const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const angDiff = (a, b) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
-const XR8_URL = 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js';
+const XR8_URL = window.__MAMBO_XR8_URL || 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js';
 
 let mode = 'virtual';            // 'virtual' | 'slam' | 'gyro'
 let arHeight = 1.3;              // phone height above the floor in the camera modes (m)
@@ -621,8 +620,11 @@ async function startCamera() {
     const m = await motion;
     const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     probe.getTracks().forEach((t) => t.stop());
-    if (m === 'denied') { const e = new Error('motion'); e.name = 'MotionDeniedError'; throw e; }
-    if (!(await trySlam())) await tryGyro();
+    diag.motion = m;                          // SLAM can run without it; only the gyro fallback needs it
+    if (!(await trySlam())) {
+      if (m === 'denied') { const e = new Error('motion'); e.name = 'MotionDeniedError'; throw e; }
+      await tryGyro();
+    }
     toast(mode === 'slam' ? '바닥을 천천히 비춰 주세요. 맘보가 바닥에 내려와요.' : '공간 추적이 안 돼서 제자리 AR로 켰어요. 걸어 다니면 위치가 어긋나요.');
   } catch (err) {
     diag.err = String((err && (err.name + ': ' + err.message)) || err);
@@ -675,7 +677,7 @@ function setMode(next) {
   mode = next;
   document.body.dataset.mode = next;
   floor.visible = next === 'virtual';
-  $('#btnCam').textContent = next === 'virtual' ? '카메라 AR' : '3D 보기';
+  $('#btnCam').textContent = next === 'virtual' ? '📷 카메라로 보기' : '3D로 돌아가기';
   $('#btnHeight').hidden = next === 'virtual';
   $('#hint').textContent = next === 'virtual'
     ? '조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요'
@@ -685,26 +687,6 @@ function setMode(next) {
   resize();
 }
 $('#btnCam').addEventListener('click', () => { if (mode === 'virtual') startCamera(); else stopCamera(); });
-
-// ---------------------------------------------------------------- iPhone built-in AR (Quick Look, no controls)
-const quickAnchor = document.createElement('a');
-const canQuickLook = quickAnchor.relList && quickAnchor.relList.supports && quickAnchor.relList.supports('ar');
-if (canQuickLook) $('#btnQuick').hidden = false;
-$('#btnQuick').addEventListener('click', async () => {
-  if (!pet.model || busy) return;
-  busy = true; setLoading('기본 AR 준비 중…');
-  try {
-    const { USDZExporter } = await import('three/addons/exporters/USDZExporter.js');
-    const s = new THREE.Scene(), m = pet.model.clone();
-    s.add(m); s.updateMatrixWorld(true);
-    const ab = await new USDZExporter().parseAsync(s);
-    const url = URL.createObjectURL(new Blob([ab], { type: 'model/vnd.usdz+zip' }));
-    quickAnchor.rel = 'ar'; quickAnchor.href = url + '#allowsContentScaling=0';
-    if (!quickAnchor.firstChild) quickAnchor.appendChild(document.createElement('img'));
-    quickAnchor.click();
-  } catch (e) { toast('기본 AR을 열지 못했어요.'); diag.err = String(e); }
-  finally { setLoading(null); busy = false; }
-});
 
 // ---------------------------------------------------------------- ui helpers
 let toastTimer = 0;
