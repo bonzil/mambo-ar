@@ -28,7 +28,7 @@
   .chip.primary { background:var(--accent); color:#fff; border-color:transparent; }
   .chip[hidden] { display:none; }
 
-  .faces { position:fixed; left:0; right:0; bottom:calc(max(14px,env(safe-area-inset-bottom)) + 146px); display:flex; gap:6px; overflow-x:auto; padding:4px 12px; scrollbar-width:none; }
+  .faces { position:fixed; left:0; right:0; bottom:calc(max(14px,env(safe-area-inset-bottom)) + 150px); display:flex; gap:6px; overflow-x:auto; padding:4px 12px; scrollbar-width:none; }
   .faces::-webkit-scrollbar { display:none; }
   .faces button { flex:none; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:7px 12px; font:inherit; font-size:13px; font-weight:700; }
   .faces button.on { background:var(--ink); color:#fff; }
@@ -39,7 +39,10 @@
   .acts { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:calc(max(14px,env(safe-area-inset-bottom)) + 8px); display:flex; gap:12px; align-items:flex-end; }
   .act { border:0; border-radius:50%; font:inherit; font-weight:800; color:#fff; box-shadow:0 6px 16px rgba(91,58,67,.3); touch-action:manipulation; transition:transform .08s; }
   .act:active { transform:scale(.9); }
-  #btnMambo { width:74px; height:74px; font-size:15px; background:#f2a541; }
+  .acts .col { display:flex; flex-direction:column; gap:8px; align-items:center; }
+  #btnMambo { width:68px; height:68px; font-size:15px; background:#f2a541; }
+  #btnProne { width:60px; height:60px; font-size:13px; background:#8f7bd6; }
+  #btnProne[aria-pressed=true] { background:#5b3a43; }
   #btnJump { width:94px; height:94px; font-size:18px; background:var(--accent); }
 
   #bubble { position:fixed; left:0; top:0; padding:6px 12px; border-radius:14px; background:#fff; color:var(--ink); font-weight:800; font-size:16px;
@@ -74,7 +77,10 @@
 
 <div id="stick" aria-label="이동 조이스틱"><div id="knob"></div></div>
 <div class="acts">
-  <button class="act" id="btnMambo" type="button">맘보!</button>
+  <div class="col">
+    <button class="act" id="btnProne" type="button" aria-pressed="false">엎드려</button>
+    <button class="act" id="btnMambo" type="button">맘보!</button>
+  </div>
   <button class="act" id="btnJump" type="button">점프</button>
 </div>
 
@@ -192,14 +198,38 @@ for (const [k, [label]] of Object.entries(FACES)) {
 }
 facesBar.firstChild.classList.add('on');
 
+// Skeleton (MMD bone names). Each bone is turned about the model's own axes:
+// x = left (nod), y = up (turn), z = forward (tilt), on top of its rest pose.
+const BONES = {
+  lower: '下半身', upper: '上半身', upper2: '上半身2', neck: '首', head: '頭',
+  armL: '腕.L', armR: '腕.R', elbowL: 'ひじ.L', elbowR: 'ひじ.R',
+  legL: '足D.L', legR: '足D.R', kneeL: 'ひざD.L', kneeR: 'ひざD.R', tail: 'しっぽ',
+};
+const rig = {};
+const _bq = new THREE.Quaternion(), _be = new THREE.Euler();
+function prepBone(model, name) {
+  const bone = model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
+  if (!bone || !bone.parent) return null;
+  const pq = new THREE.Quaternion();
+  bone.parent.getWorldQuaternion(pq);
+  return { bone, rest: bone.quaternion.clone(), pq, pqInv: pq.clone().invert() };
+}
+function turnBone(b, rx, ry, rz) {
+  if (!b) return;
+  _bq.setFromEuler(_be.set(rx, ry, rz, 'YXZ'));
+  b.bone.quaternion.copy(b.pqInv).multiply(_bq).multiply(b.pq).multiply(b.rest);
+}
+
 async function loadMambo() {
-  const gltf = await new GLTFLoader().loadAsync('models/mambo.glb?v=7');
+  const gltf = await new GLTFLoader().loadAsync('models/mambo_rig.glb?v=8');
   const model = gltf.scene;
   model.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(model);
   const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
   model.position.set(-center.x, -box.min.y, -center.z);
   pet.height = size.y;
+  model.updateMatrixWorld(true);
+  for (const [k, n] of Object.entries(BONES)) rig[k] = prepBone(model, n);
   model.traverse((o) => {
     if (!o.isMesh) return;
     o.frustumCulled = false;
@@ -291,7 +321,15 @@ function poke() {
   pet.wiggle = 0.6;
   if (pet.grounded) { pet.vy = Math.sqrt(2 * 9.8 * pet.height * 0.12); pet.grounded = false; pet.airJumps = 0; }
 }
-$('#btnJump').addEventListener('pointerdown', (e) => { e.preventDefault(); jump(); });
+const pose = { prone: false, p: 0 };
+function setProne(on) {
+  pose.prone = on;
+  $('#btnProne').setAttribute('aria-pressed', on ? 'true' : 'false');
+  $('#btnProne').textContent = on ? '일어나' : '엎드려';
+  if (on) { pet.target = null; Sound.tone(520, 300, 0.25, 0.08); }
+}
+$('#btnProne').addEventListener('pointerdown', (e) => { e.preventDefault(); setProne(!pose.prone); });
+$('#btnJump').addEventListener('pointerdown', (e) => { e.preventDefault(); if (pose.prone) setProne(false); else jump(); });
 $('#btnMambo').addEventListener('pointerdown', (e) => { e.preventDefault(); mambo(); });
 
 // ---------------------------------------------------------------- joystick + keys
@@ -327,6 +365,7 @@ function keyAxis() {
 
 // ---------------------------------------------------------------- movement
 const UP = new THREE.Vector3(0, 1, 0), _f = new THREE.Vector3(), _r = new THREE.Vector3();
+const PRONE = { lift: 0.18, back: 0.45, arch: -0.35, arch2: -0.25, neck: -0.45, head: -0.5, armX: 0.5, armY: 0, armZ: 0.5, elbowY: 0, knee: 1.0 };
 const WALK_SPEED = 1.3;          // body heights per second
 const HOP_PERIOD = 0.3;
 function stepPet(dt) {
@@ -338,11 +377,13 @@ function stepPet(dt) {
   let ix = stick.x + kx, iy = stick.y + ky;
   const mag = Math.min(1, Math.hypot(ix, iy));
   let dx = 0, dz = 0;
-  if (mag > 0.1) {
+  if (mag > 0.1 && pose.prone) setProne(false);
+  if (pose.p > 0.05) { ix = iy = 0; pet.target = null; }
+  if (mag > 0.1 && pose.p <= 0.05) {
     const n = Math.hypot(ix, iy); ix /= n; iy /= n;
     dx = (_r.x * ix - _f.x * iy) * mag; dz = (_r.z * ix - _f.z * iy) * mag;
     pet.target = null;
-  } else if (pet.target) {
+  } else if (pet.target && pose.p <= 0.05) {
     const tx = pet.target.x - pet.x, tz = pet.target.z - pet.z, d = Math.hypot(tx, tz);
     if (d < H * 0.08) pet.target = null;
     else { const s = Math.min(1, d / (H * 0.4)); dx = (tx / d) * s; dz = (tz / d) * s; }
@@ -391,6 +432,26 @@ function stepPet(dt) {
   pet.body.scale.set(sxz, sy, sxz);
   pet.body.rotation.set(speed * 0.12 * (pet.grounded ? 1 : 0.5), (1 - pet.spin) * (pet.spin > 0 ? Math.PI * 2 : 0),
     Math.sin(time * 18) * 0.16 * pet.wiggle, 'YXZ');
+  // Lying on the belly, chin up, head swaying slowly side to side, feet kicking in the air.
+  pose.p = damp(pose.p, pose.prone ? 1 : 0, 5, dt);
+  const e = pose.p * pose.p * (3 - 2 * pose.p);
+  if (e > 0.001) {
+    pet.body.rotation.x = pet.body.rotation.x * (1 - e) + (Math.PI / 2) * e;
+    pet.body.position.y += H * PRONE.lift * e;
+    pet.body.position.z = -H * PRONE.back * e;
+  } else pet.body.position.z = 0;
+  const sway = Math.sin(time * 2.1), kick = time * 3.2;
+  turnBone(rig.upper, PRONE.arch * e, 0, 0);
+  turnBone(rig.upper2, PRONE.arch2 * e, 0, 0);
+  turnBone(rig.neck, PRONE.neck * e, 0.15 * sway * e, 0.12 * sway * e);
+  turnBone(rig.head, PRONE.head * e, 0.22 * sway * e, 0.3 * sway * e);
+  turnBone(rig.armL, PRONE.armX * e, PRONE.armY * e, PRONE.armZ * e);
+  turnBone(rig.armR, PRONE.armX * e, -PRONE.armY * e, -PRONE.armZ * e);
+  turnBone(rig.elbowL, 0, PRONE.elbowY * e, 0);
+  turnBone(rig.elbowR, 0, -PRONE.elbowY * e, 0);
+  turnBone(rig.kneeL, (PRONE.knee + 0.45 * Math.sin(kick)) * e, 0, 0);
+  turnBone(rig.kneeR, (PRONE.knee + 0.45 * Math.sin(kick + Math.PI)) * e, 0, 0);
+  turnBone(rig.tail, 0.3 * e, 0.35 * sway * e, 0);
   const lift = pet.y + hopY;
   shadow.scale.setScalar(Math.max(0.2, 1 - lift / (H * 1.5)) * pet.height * 0.7);
   shadow.material.opacity = clamp(1 - lift / (H * 1.4), 0.25, 1) * 0.7;
@@ -867,7 +928,7 @@ function loop(now) { if (mode !== 'slam') frame(now); requestAnimationFrame(loop
 resize();
 requestAnimationFrame(loop);
 loadMambo().then(() => setLoading(null)).catch((e) => { setLoading('맘보를 불러오지 못했어요. 새로 고쳐 주세요.'); diag.err = String(e); });
-window.__mambo = { pet, orbit, face, diag, jump, mambo, camera, slam, light, sun, hemi, get mode() { return mode; } };
+window.__mambo = { pet, orbit, face, diag, jump, mambo, camera, slam, light, sun, hemi, rig, PRONE, setProne, get mode() { return mode; } };
 </script>
 </body>
 </html>
