@@ -64,9 +64,9 @@
   <div class="title"><h1>맘보 AR</h1><p id="hint">조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요</p></div>
   <div class="sp"></div>
   <div class="tools">
-    <button class="chip primary" id="btnCam" type="button">카메라 AR</button>
+    <button class="chip primary" id="btnCam" type="button">📷 카메라로 보기</button>
     <button class="chip" id="btnHeight" type="button" hidden>폰 높이: 서서</button>
-    <button class="chip" id="btnQuick" type="button" hidden>기본 AR</button>
+    <button class="chip" id="btnSun" type="button" hidden>☀️ 햇빛 연동: 켬</button>
   </div>
 </div>
 
@@ -90,7 +90,7 @@ const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const angDiff = (a, b) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
-const XR8_URL = 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js';
+const XR8_URL = window.__MAMBO_XR8_URL || 'https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js';
 
 let mode = 'virtual';            // 'virtual' | 'slam' | 'gyro'
 let arHeight = 1.3;              // phone height above the floor in the camera modes (m)
@@ -104,10 +104,20 @@ renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
-scene.add(new THREE.HemisphereLight(0xffffff, 0xd9b8c0, 1.7));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const hemi = new THREE.HemisphereLight(0xffffff, 0xd9b8c0, 1.7);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff3e6, 1.3);
 sun.position.set(1, 3, 2);
-scene.add(sun);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.01;
+scene.add(sun, sun.target);
+// Invisible floor that only shows Mambo's shadow (real floor in AR, virtual floor in 3D).
+const shadowCatcher = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.ShadowMaterial({ opacity: 0.3, depthWrite: false }));
+shadowCatcher.rotation.x = -Math.PI / 2; shadowCatcher.position.y = 0.0015; shadowCatcher.receiveShadow = true; shadowCatcher.renderOrder = 1;
+scene.add(shadowCatcher);
 
 function canvasTex(w, h, draw) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -160,6 +170,7 @@ const FACES = {
   panic: ['><', 7, 11], dizzy: ['어질', 14, 18], sleepy: ['졸림', 10, 4], cry: ['울음', 11, 9],
 };
 const BLINK = 8;
+const faceMats = [];   // face parts are 'emissive only': they ignore lights, so their brightness is set by hand
 const face = { eye: null, mouth: null, base: 'idle', over: null, overUntil: 0, blinkT: 2.5, blinking: 0 };
 const setCell = (tex, c) => { if (tex) tex.offset.set((c % 4) / 4, Math.floor(c / 4) / 8); };
 function flashFace(name, sec) { face.over = name; face.overUntil = time + sec; }
@@ -192,7 +203,9 @@ async function loadMambo() {
   model.traverse((o) => {
     if (!o.isMesh) return;
     o.frustumCulled = false;
+    o.castShadow = true;
     const m = o.material;
+    if (m.emissiveMap) faceMats.push(m);
     if (m.name === 'Eyes') face.eye = m.emissiveMap;
     if (m.name === 'Mouth') face.mouth = m.emissiveMap;
   });
@@ -292,7 +305,7 @@ function moveStick(e) {
   stick.x = dx / max; stick.y = dy / max;
   knob.style.transform = `translate(${dx}px,${dy}px)`;
 }
-stickEl.addEventListener('pointerdown', (e) => { stick.id = e.pointerId; stickEl.setPointerCapture(e.pointerId); moveStick(e); });
+stickEl.addEventListener('pointerdown', (e) => { stick.id = e.pointerId; try { stickEl.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ } moveStick(e); });
 stickEl.addEventListener('pointermove', (e) => { if (e.pointerId === stick.id) moveStick(e); });
 const endStick = (e) => { if (e.pointerId !== stick.id) return; stick.id = null; stick.x = stick.y = 0; knob.style.transform = ''; };
 stickEl.addEventListener('pointerup', endStick);
@@ -379,8 +392,8 @@ function stepPet(dt) {
   pet.body.rotation.set(speed * 0.12 * (pet.grounded ? 1 : 0.5), (1 - pet.spin) * (pet.spin > 0 ? Math.PI * 2 : 0),
     Math.sin(time * 18) * 0.16 * pet.wiggle, 'YXZ');
   const lift = pet.y + hopY;
-  shadow.scale.setScalar(Math.max(0.2, 1 - lift / (H * 1.5)) * pet.height * 1.25);
-  shadow.material.opacity = clamp(1 - lift / (H * 1.4), 0.25, 1);
+  shadow.scale.setScalar(Math.max(0.2, 1 - lift / (H * 1.5)) * pet.height * 0.7);
+  shadow.material.opacity = clamp(1 - lift / (H * 1.4), 0.25, 1) * 0.7;
 }
 
 // speech bubble above the head
@@ -433,7 +446,7 @@ function handleTap(cx, cy) {
 const ptrs = new Map();
 let tap = null, pinch = null;
 canvas.addEventListener('pointerdown', (e) => {
-  canvas.setPointerCapture(e.pointerId);
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
   else { tap = null; const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: orbit.r }; }
@@ -561,6 +574,16 @@ const rad = Math.PI / 180, _zee = new THREE.Vector3(0, 0, 1), _eu = new THREE.Eu
 window.addEventListener('deviceorientation', (ev) => {
   if (ev.alpha === null || ev.beta === null || ev.gamma === null) return;
   gyro.alpha = ev.alpha * rad; gyro.beta = ev.beta * rad; gyro.gamma = ev.gamma * rad; gyro.has = true;
+  if (typeof ev.webkitCompassHeading === 'number' && ev.webkitCompassHeading >= 0) {           // iPhone
+    // alpha is relative to where the phone pointed at start; the compass tells us where north is.
+    light.alphaOffset = circMix(light.alphaOffset, ev.alpha * rad - (2 * Math.PI - ev.webkitCompassHeading * rad), 0.1);
+    light.compass = true;
+  }
+});
+window.addEventListener('deviceorientationabsolute', (ev) => {                                       // Android
+  if (ev.alpha === null) return;
+  light.alphaOffset = circMix(light.alphaOffset, (gyro.has ? gyro.alpha : ev.alpha * rad) - ev.alpha * rad, 0.1);
+  light.compass = true;
 });
 const screenAngle = () => ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (Number(window.orientation) || 0)) * rad;
 function applyGyro(dt) {
@@ -621,8 +644,11 @@ async function startCamera() {
     const m = await motion;
     const probe = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     probe.getTracks().forEach((t) => t.stop());
-    if (m === 'denied') { const e = new Error('motion'); e.name = 'MotionDeniedError'; throw e; }
-    if (!(await trySlam())) await tryGyro();
+    diag.motion = m;                          // SLAM can run without it; only the gyro fallback needs it
+    if (!(await trySlam())) {
+      if (m === 'denied') { const e = new Error('motion'); e.name = 'MotionDeniedError'; throw e; }
+      await tryGyro();
+    }
     toast(mode === 'slam' ? '바닥을 천천히 비춰 주세요. 맘보가 바닥에 내려와요.' : '공간 추적이 안 돼서 제자리 AR로 켰어요. 걸어 다니면 위치가 어긋나요.');
   } catch (err) {
     diag.err = String((err && (err.name + ': ' + err.message)) || err);
@@ -675,8 +701,11 @@ function setMode(next) {
   mode = next;
   document.body.dataset.mode = next;
   floor.visible = next === 'virtual';
-  $('#btnCam').textContent = next === 'virtual' ? '카메라 AR' : '3D 보기';
+  $('#btnCam').textContent = next === 'virtual' ? '📷 카메라로 보기' : '3D로 돌아가기';
   $('#btnHeight').hidden = next === 'virtual';
+  $('#btnSun').hidden = next === 'virtual';
+  if (next !== 'virtual' && light.on) askLocation();
+  light.north = null;
   $('#hint').textContent = next === 'virtual'
     ? '조이스틱으로 움직이고, 바닥을 톡 누르면 그리로 가요'
     : '바닥을 톡 누르면 맘보가 걸어가요';
@@ -686,24 +715,120 @@ function setMode(next) {
 }
 $('#btnCam').addEventListener('click', () => { if (mode === 'virtual') startCamera(); else stopCamera(); });
 
-// ---------------------------------------------------------------- iPhone built-in AR (Quick Look, no controls)
-const quickAnchor = document.createElement('a');
-const canQuickLook = quickAnchor.relList && quickAnchor.relList.supports && quickAnchor.relList.supports('ar');
-if (canQuickLook) $('#btnQuick').hidden = false;
-$('#btnQuick').addEventListener('click', async () => {
-  if (!pet.model || busy) return;
-  busy = true; setLoading('기본 AR 준비 중…');
+// ---------------------------------------------------------------- natural light
+// Sun: GPS + clock -> sun elevation/azimuth (SunCalc formulas). The compass tells which way north is
+// in the AR world, so the light and Mambo's shadow come from where the real sun is.
+// Ambient: average brightness and colour of the camera image.
+function circMix(a, b, k) {
+  if (a === null || a === undefined) return b;
+  return a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
+}
+function sunPosition(date, lat, lng) {
+  const d = date.valueOf() / 864e5 - 0.5 + 2440588 - 2451545, e = rad * 23.4397;
+  const M = rad * (357.5291 + 0.98560028 * d);
+  const L = M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L)), ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+  const phi = rad * lat, H = rad * (280.16 + 360.9856235 * d) + rad * lng - ra;
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
+  const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+  return { azimuth: (az + Math.PI) % (Math.PI * 2), altitude: alt };   // azimuth from north, clockwise
+}
+const light = {
+  on: true, geo: null, geoAsked: false, sunPos: null, sunT: -1e9,
+  compass: false, alphaOffset: null, north: null,           // north: world yaw of true north (heading convention)
+  amb: 1, tint: new THREE.Color(1, 1, 1), sampleT: 0, sampler: null,
+};
+const DEFAULT_SUN = new THREE.Vector3(1, 3, 2).normalize();
+const _sunDir = new THREE.Vector3(), _qa = new THREE.Quaternion(), _fw = new THREE.Vector3(), _c1 = new THREE.Color(), _c2 = new THREE.Color();
+function askLocation() {
+  if (light.geoAsked || !navigator.geolocation) return;
+  light.geoAsked = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => { light.geo = { lat: pos.coords.latitude, lng: pos.coords.longitude }; light.sunT = -1e9; },
+    () => { light.geo = null; toast('위치를 못 받아서 해 방향은 대략으로 맞출게요.'); },
+    { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 15000 });
+}
+// Which world yaw points to true north: compare the camera's compass heading with its yaw in the AR world.
+function trackNorth() {
+  if (!light.compass || !gyro.has || light.alphaOffset === null) return;
+  _eu.set(gyro.beta, gyro.alpha - light.alphaOffset, -gyro.gamma, 'YXZ');
+  _qa.setFromEuler(_eu).multiply(_q1).multiply(_q0.setFromAxisAngle(_zee, -screenAngle()));
+  _fw.set(0, 0, -1).applyQuaternion(_qa);
+  if (Math.abs(_fw.y) > 0.85) return;                       // looking straight down: heading is unreliable
+  const headingReal = Math.atan2(_fw.x, -_fw.z);
+  camera.getWorldDirection(_f);
+  if (Math.abs(_f.y) > 0.85) return;
+  const headingWorld = Math.atan2(_f.x, -_f.z);
+  light.north = circMix(light.north, headingReal - headingWorld, light.north === null ? 1 : 0.05);
+}
+function sampleCamera() {
+  let src = null, w = 0, h = 0;
+  if (mode === 'gyro' && video.readyState >= 2) { src = video; w = video.videoWidth; h = video.videoHeight; }
+  else if (mode === 'slam' && slam.canvas) { src = slam.canvas; w = slam.canvas.width; h = slam.canvas.height; }
+  if (!src || !w) return;
+  if (!light.sampler) { const c = document.createElement('canvas'); c.width = c.height = 16; light.sampler = c.getContext('2d', { willReadFrequently: true }); }
   try {
-    const { USDZExporter } = await import('three/addons/exporters/USDZExporter.js');
-    const s = new THREE.Scene(), m = pet.model.clone();
-    s.add(m); s.updateMatrixWorld(true);
-    const ab = await new USDZExporter().parseAsync(s);
-    const url = URL.createObjectURL(new Blob([ab], { type: 'model/vnd.usdz+zip' }));
-    quickAnchor.rel = 'ar'; quickAnchor.href = url + '#allowsContentScaling=0';
-    if (!quickAnchor.firstChild) quickAnchor.appendChild(document.createElement('img'));
-    quickAnchor.click();
-  } catch (e) { toast('기본 AR을 열지 못했어요.'); diag.err = String(e); }
-  finally { setLoading(null); busy = false; }
+    light.sampler.drawImage(src, 0, 0, w, h, 0, 0, 16, 16);
+    const px = light.sampler.getImageData(0, 0, 16, 16).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < px.length; i += 4) { r += px[i]; g += px[i + 1]; b += px[i + 2]; }
+    const n = px.length / 4; r /= n * 255; g /= n * 255; b /= n * 255;
+    if (r + g + b < 0.003) return;                          // blank read (some browsers can't read the camera canvas)
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    light.amb = damp(light.amb, clamp(lum / 0.4, 0.2, 1.6), 3, 0.4);
+    const m = Math.max(r, g, b, 1e-3);
+    _c1.setRGB(r / m, g / m, b / m); light.tint.lerp(_c2.setRGB(1, 1, 1).lerp(_c1, 0.45), 0.3);
+  } catch (e) { /* camera canvas not readable */ }
+}
+function updateLighting(dt) {
+  const H = pet.height, ar = mode !== 'virtual';
+  let sunK = 1, ambK = 1;
+  _c1.setRGB(1, 0.95, 0.9);                                 // sun colour
+  _sunDir.copy(DEFAULT_SUN);
+  if (ar) {
+    light.sampleT -= dt;
+    if (light.sampleT <= 0) { light.sampleT = 0.4; sampleCamera(); }
+    ambK = light.amb;
+    trackNorth();
+    if (light.on && light.geo) {
+      if (time - light.sunT > 30) { light.sunPos = sunPosition(new Date(), light.geo.lat, light.geo.lng); light.sunT = time; }
+      const { azimuth, altitude } = light.sunPos;
+      const yaw = azimuth - (light.north || 0);               // sun heading in the AR world
+      const ce = Math.cos(Math.max(altitude, 0.05));
+      _sunDir.set(Math.sin(yaw) * ce, Math.sin(Math.max(altitude, 0.05)), -Math.cos(yaw) * ce).normalize();
+      const day = clamp((altitude * 180 / Math.PI + 4) / 14, 0, 1);    // dark below -4°, full above 10°
+      sunK = day * clamp(ambK, 0.3, 1.2);
+      const warm = clamp(1 - altitude * 180 / Math.PI / 25, 0, 1);      // orange near the horizon
+      _c1.setRGB(1, 0.95 - 0.25 * warm, 0.9 - 0.45 * warm);
+    } else sunK = 0.6 * clamp(ambK, 0.3, 1.2);
+  }
+  sun.color.copy(_c1);
+  sun.intensity = damp(sun.intensity, (ar ? 2.4 : 1.3) * sunK, 2, dt);
+  sun.position.set(pet.x, 0, pet.z).addScaledVector(_sunDir, 3);
+  sun.target.position.set(pet.x, 0, pet.z);
+  const S = H * clamp(1.2 + Math.hypot(_sunDir.x, _sunDir.z) / Math.max(_sunDir.y, 0.1), 1.6, 5), cam = sun.shadow.camera;   // long shadows at sunrise/sunset
+  if (cam.right !== S) { cam.left = -S; cam.right = S; cam.top = S; cam.bottom = -S; cam.near = 0.1; cam.far = 8; cam.updateProjectionMatrix(); }
+  shadowCatcher.position.set(pet.x, 0.0015, pet.z);
+  shadowCatcher.material.opacity = 0.32 * clamp(sun.intensity / 1.3, 0, 1);
+  hemi.intensity = damp(hemi.intensity, (ar ? 1.25 : 1.7) * clamp(ambK, 0.25, 1.5), 2, dt);
+  hemi.color.copy(ar ? light.tint : _c2.setRGB(1, 1, 1));
+  // Face parts glow on their own, so dim and tint them with the room or they'd look pasted on.
+  const faceK = ar ? clamp(0.35 + 0.65 * ambK, 0.35, 1.1) : 1;
+  for (const m of faceMats) { m.emissiveIntensity = damp(m.emissiveIntensity, faceK, 3, dt); m.emissive.copy(ar ? light.tint : _c2.setRGB(1, 1, 1)); }
+}
+function sunStatus() {
+  if (!light.on) return '햇빛 연동 꺼짐 · 카메라 밝기만 맞춰요';
+  if (!light.geo || !light.sunPos) return light.geoAsked ? '위치 확인 중…' : '';
+  const a = light.sunPos.altitude * 180 / Math.PI;
+  if (a < -4) return '🌙 지금은 해가 졌어요 · 카메라 밝기에 맞춰요';
+  const dirs = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+  const dirName = dirs[Math.round(light.sunPos.azimuth / (Math.PI / 4)) % 8];
+  return `☀️ 해 ${dirName}쪽 ${Math.round(a)}°` + (light.compass ? '' : ' · 나침반 없음(방향은 대략)');
+}
+$('#btnSun').addEventListener('click', () => {
+  light.on = !light.on;
+  $('#btnSun').textContent = '☀️ 햇빛 연동: ' + (light.on ? '켬' : '끔');
+  if (light.on) askLocation();
 });
 
 // ---------------------------------------------------------------- ui helpers
@@ -723,14 +848,15 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ---------------------------------------------------------------- loop
-let errs = 0;
+let errs = 0, hintT = 0;
 function frame(now) {
   try {
     const dt = clamp((now - lastT) / 1000, 0.001, 0.05);
     lastT = now; time += dt;
     if (mode === 'virtual') applyOrbit(dt); else if (mode === 'gyro') applyGyro(dt); else applySlam();
     settleSpawn(dt);
-    if (pet.model) { stepPet(dt); updateFace(dt); }
+    if (pet.model) { stepPet(dt); updateFace(dt); updateLighting(dt); }
+    if (mode !== 'virtual') { hintT -= dt; if (hintT <= 0) { hintT = 1; const st = sunStatus(); if (st) $('#hint').textContent = st; } }
     if (markerLife > 0) { markerLife -= dt * 1.2; marker.visible = markerLife > 0; marker.material.opacity = Math.max(0, markerLife); }
     updateBubble();
     renderer.render(scene, camera);
@@ -741,7 +867,7 @@ function loop(now) { if (mode !== 'slam') frame(now); requestAnimationFrame(loop
 resize();
 requestAnimationFrame(loop);
 loadMambo().then(() => setLoading(null)).catch((e) => { setLoading('맘보를 불러오지 못했어요. 새로 고쳐 주세요.'); diag.err = String(e); });
-window.__mambo = { pet, orbit, face, diag, jump, mambo, get mode() { return mode; } };
+window.__mambo = { pet, orbit, face, diag, jump, mambo, camera, slam, light, sun, hemi, get mode() { return mode; } };
 </script>
 </body>
 </html>
